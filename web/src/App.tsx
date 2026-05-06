@@ -11,6 +11,7 @@ import {
   Response,
   DeviceInfoResponse,
 } from "./proto/zmk/device_info/device_info";
+import type { RpcConnection } from "@zmkfirmware/zmk-studio-ts-client";
 
 export const SUBSYSTEM_IDENTIFIER = "zmk__device_info";
 
@@ -79,7 +80,7 @@ export function DeviceInfoPanel() {
   // the caller (manual refresh button) sets the loading flag before calling this.
   const doFetch = useCallback(
     async (
-      connection: typeof zmkApp.state.connection,
+      connection: RpcConnection,
       subsystemIndex: number
     ) => {
       const service = new ZMKCustomSubsystem(connection!, subsystemIndex);
