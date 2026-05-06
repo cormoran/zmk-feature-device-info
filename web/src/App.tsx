@@ -75,49 +75,53 @@ export function DeviceInfoPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const subsystem = zmkApp?.findSubsystem(SUBSYSTEM_IDENTIFIER);
+  const connection = zmkApp?.state.connection;
+  const subsystemIndex = subsystem?.index;
 
-  // Async fetch with no synchronous setState before the first await —
-  // the caller (manual refresh button) sets the loading flag before calling this.
-  const doFetch = useCallback(
-    async (
-      connection: RpcConnection,
-      subsystemIndex: number
-    ) => {
+  const fetchDeviceInfo = useCallback(
+    async (connection: RpcConnection, subsystemIndex: number) => {
       const service = new ZMKCustomSubsystem(connection!, subsystemIndex);
       const request = Request.create({ getDeviceInfo: {} });
       const payload = Request.encode(request).finish();
       const responsePayload = await service.callRPC(payload);
-      if (responsePayload) {
-        const resp = Response.decode(responsePayload);
-        if (resp.deviceInfo) {
-          setInfo(resp.deviceInfo);
-        } else if (resp.error) {
-          setError(resp.error.message);
-        }
+      if (!responsePayload) return null;
+      const resp = Response.decode(responsePayload);
+      if (resp.error) {
+        throw new Error(resp.error.message);
       }
+      return resp.deviceInfo ?? null;
     },
-    [setInfo, setError]
+    []
   );
 
   // Auto-fetch when subsystem becomes available.
   useEffect(() => {
-    if (!subsystem || !zmkApp?.state.connection) return;
+    if (!connection || subsystemIndex === undefined) return;
     let cancelled = false;
-    doFetch(zmkApp.state.connection, subsystem.index).catch((e) => {
-      if (!cancelled)
+    const loadInfo = async () => {
+      try {
+        const nextInfo = await fetchDeviceInfo(connection, subsystemIndex);
+        if (cancelled) return;
+        setInfo(nextInfo);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
         setError(e instanceof Error ? e.message : "Unknown error");
-    });
+      }
+    };
+    void loadInfo();
     return () => {
       cancelled = true;
     };
-  }, [subsystem?.index, doFetch, zmkApp?.state.connection]);
+  }, [connection, fetchDeviceInfo, subsystemIndex]);
 
   const fetchInfo = async () => {
-    if (!zmkApp?.state.connection || !subsystem) return;
+    if (!connection || subsystemIndex === undefined) return;
     setIsLoading(true);
     setError(null);
     try {
-      await doFetch(zmkApp.state.connection, subsystem.index);
+      const nextInfo = await fetchDeviceInfo(connection, subsystemIndex);
+      setInfo(nextInfo);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
