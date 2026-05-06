@@ -24,7 +24,7 @@ Answers: *"Which firmware is this keyboard running?"*
 | `build_timestamp` | CMake-injected `BUILD_TIMESTAMP` | ISO-8601 string, e.g. `"2025-05-01T12:34:56"` |
 | `board` | `CONFIG_BOARD` Kconfig string | e.g. `"xiao_ble"` |
 
-**zmk-config version injection:**  
+**zmk-config version injection:**
 ZMK's build system exposes the config directory as the `ZMK_CONFIG` CMake variable (set by `west zmk-build` / `west build -d ... -- -DZMK_CONFIG=...`). The module's CMakeLists.txt runs `git -C ${ZMK_CONFIG} describe --dirty --always --tags` at configure time and injects the result as the `ZMK_CONFIG_BUILD_VERSION` compile definition. If `ZMK_CONFIG` is not set or is not a git repo, the field is left empty.
 
 **Rationale for additional fields:**
@@ -46,7 +46,7 @@ Answers: *"What MCU is this, and what happened before I connected?"*
 | `flash_size_kb` | `CONFIG_FLASH_SIZE` | Total flash in KB (compile-time) |
 | `sram_size_kb` | `CONFIG_SRAM_SIZE` | Total SRAM in KB (compile-time) |
 
-**Additional proposal — `reset_cause`:**  
+**Additional proposal — `reset_cause`:**
 This is highly valuable for troubleshooting spontaneous reboots. A watchdog reset suggests a firmware hang; a brownout reset suggests a power supply problem.
 
 ---

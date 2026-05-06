@@ -25,10 +25,9 @@ ZMK_RPC_CUSTOM_SUBSYSTEM(zmk__device_info, &device_info_meta, device_info_rpc_ha
 ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER(zmk__device_info, zmk_device_info_Response);
 
 static bool device_info_rpc_handle_request(const zmk_custom_CallRequest *raw_request,
-                                            pb_callback_t *encode_response);
+                                           pb_callback_t *encode_response);
 
-static bool encode_zephyr_devices(pb_ostream_t *stream, const pb_field_t *field,
-                                   void *const *arg) {
+static bool encode_zephyr_devices(pb_ostream_t *stream, const pb_field_t *field, void *const *arg) {
     const struct device *devices;
     size_t count = z_device_get_all_static(&devices);
 
@@ -50,7 +49,7 @@ static bool encode_zephyr_devices(pb_ostream_t *stream, const pb_field_t *field,
 }
 
 static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *req,
-                                   zmk_device_info_Response *resp) {
+                                  zmk_device_info_Response *resp) {
     zmk_device_info_DeviceInfoResponse result = zmk_device_info_DeviceInfoResponse_init_zero;
 
     /* Build info */
@@ -101,22 +100,22 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
     /* ZMK config (compile-time Kconfig/DT values) */
 #if DT_HAS_CHOSEN(zmk_kscan)
     /* DT_PROP_BY_IDX for compatible is unreliable; check known types explicitly */
-#  if DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_matrix)
+#if DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_matrix)
     strncpy(result.zmk_config.kscan_compatible, "zmk,kscan-gpio-matrix",
             sizeof(result.zmk_config.kscan_compatible) - 1);
-#  elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_direct)
+#elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_direct)
     strncpy(result.zmk_config.kscan_compatible, "zmk,kscan-gpio-direct",
             sizeof(result.zmk_config.kscan_compatible) - 1);
-#  elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_demux)
+#elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_demux)
     strncpy(result.zmk_config.kscan_compatible, "zmk,kscan-gpio-demux",
             sizeof(result.zmk_config.kscan_compatible) - 1);
-#  elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_composite)
+#elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_composite)
     strncpy(result.zmk_config.kscan_compatible, "zmk,kscan-composite",
             sizeof(result.zmk_config.kscan_compatible) - 1);
-#  elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_mock)
+#elif DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_mock)
     strncpy(result.zmk_config.kscan_compatible, "zmk,kscan-mock",
             sizeof(result.zmk_config.kscan_compatible) - 1);
-#  endif
+#endif
 #endif
 
     result.zmk_config.ble_enabled = IS_ENABLED(CONFIG_ZMK_BLE);
@@ -149,7 +148,7 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
 }
 
 static bool device_info_rpc_handle_request(const zmk_custom_CallRequest *raw_request,
-                                            pb_callback_t *encode_response) {
+                                           pb_callback_t *encode_response) {
     zmk_device_info_Response *resp =
         ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER_ALLOCATE(zmk__device_info, encode_response);
 
