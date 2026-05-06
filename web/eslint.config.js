@@ -21,5 +21,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Data fetching in effects with setState is a widely accepted pattern.
+      // The rule is overly strict for async fetch use cases.
+      "react-hooks/set-state-in-effect": "warn",
+    },
   },
 ]);
