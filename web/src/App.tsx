@@ -96,14 +96,15 @@ export function DeviceInfoPanel() {
 
   // Auto-fetch when subsystem becomes available.
   useEffect(() => {
-    if (!connection || subsystemIndex === undefined) return;
+    if (!connection || subsystemIndex === undefined || subsystemIndex < 0)
+      return;
     let cancelled = false;
     const loadInfo = async () => {
       try {
         const nextInfo = await fetchDeviceInfo(connection, subsystemIndex);
         if (cancelled) return;
-        setInfo(nextInfo);
         setError(null);
+        setInfo(nextInfo);
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Unknown error");
@@ -116,7 +117,8 @@ export function DeviceInfoPanel() {
   }, [connection, fetchDeviceInfo, subsystemIndex]);
 
   const fetchInfo = async () => {
-    if (!connection || subsystemIndex === undefined) return;
+    if (!connection || subsystemIndex === undefined || subsystemIndex < 0)
+      return;
     setIsLoading(true);
     setError(null);
     try {
