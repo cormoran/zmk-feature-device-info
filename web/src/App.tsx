@@ -80,7 +80,7 @@ export function DeviceInfoPanel() {
 
   const fetchDeviceInfo = useCallback(
     async (connection: RpcConnection, subsystemIndex: number) => {
-      const service = new ZMKCustomSubsystem(connection!, subsystemIndex);
+      const service = new ZMKCustomSubsystem(connection, subsystemIndex);
       const request = Request.create({ getDeviceInfo: {} });
       const payload = Request.encode(request).finish();
       const responsePayload = await service.callRPC(payload);
