@@ -144,7 +144,7 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
 
     /* Runtime status */
     result.has_runtime = true;
-    result.runtime.uptime_ms = (uint64_t)k_uptime_get();
+    result.runtime.uptime_ms = (uint32_t)k_uptime_get();
 
     resp->which_response_type = zmk_device_info_Response_device_info_tag;
     resp->response_type.device_info = result;

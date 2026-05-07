@@ -41,7 +41,7 @@ message ZmkConfig {
     bool battery_level_enabled = 10;
 }
 
-message RuntimeStatus { uint64 uptime_ms = 1; }
+message RuntimeStatus { uint32 uptime_ms = 1; }
 
 message DeviceInfoResponse {
     BuildInfo build = 1;

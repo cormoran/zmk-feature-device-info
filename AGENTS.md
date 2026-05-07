@@ -12,6 +12,7 @@ This repository contains a ZMK module with Web UI using the **unofficial** custo
 - Create pull request to origin after finishing the task
 - When implementing new features, follow this order: proto definition → firmware handler → web UI
 - **nanopb sub-message encoding**: In proto3, nanopb generates a `has_<field>` boolean for every sub-message field. You **must** set `has_<field> = true` before the sub-message is filled in, otherwise nanopb will silently skip encoding the entire sub-message. Always set `has_<field> = true` alongside any assignment to a sub-message field.
+- **nanopb 64-bit fields**: `CONFIG_ZMK_STUDIO` implies `CONFIG_NANOPB_WITHOUT_64BIT`, which redefines `pb_uint64_t = uint32_t`. Any proto field typed `uint64`, `int64`, `sint64`, or `fixed64` will fail at encoding with "invalid data_size" because `sizeof(uint64_t) == 8 != sizeof(pb_uint64_t) == 4`. **Never use 64-bit proto field types in this module.** Use `uint32` / `int32` instead (e.g. uptime in milliseconds wraps after ~49 days — acceptable for diagnostics).
 
 ## Commands
 
