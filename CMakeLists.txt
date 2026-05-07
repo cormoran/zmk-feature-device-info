@@ -1,8 +1,59 @@
 zephyr_include_directories(include)
-if(CONFIG_ZMK_TEMPLATE_FEATURE)
-    # target_sources(app PRIVATE ...)
+if(CONFIG_ZMK_DEVICE_INFO)
+    if(CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC)
+        # Inject git version of ZMK application source
+        execute_process(
+            COMMAND git -C ${APPLICATION_SOURCE_DIR} describe --dirty --always --tags
+            OUTPUT_VARIABLE ZMK_BUILD_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(NOT ZMK_BUILD_VERSION)
+            set(ZMK_BUILD_VERSION "unknown")
+        endif()
 
-    if(CONFIG_ZMK_TEMPLATE_FEATURE_STUDIO_RPC)
+        # Inject git version of zmk-config directory (if it is a git repo)
+        set(ZMK_CONFIG_BUILD_VERSION "")
+        if(DEFINED ZMK_CONFIG AND EXISTS "${ZMK_CONFIG}")
+            execute_process(
+                COMMAND git -C ${ZMK_CONFIG} rev-parse --git-dir
+                RESULT_VARIABLE _zmk_config_git_result
+                OUTPUT_QUIET ERROR_QUIET
+            )
+            if(_zmk_config_git_result EQUAL 0)
+                execute_process(
+                    COMMAND git -C ${ZMK_CONFIG} describe --dirty --always --tags
+                    OUTPUT_VARIABLE ZMK_CONFIG_BUILD_VERSION
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET
+                )
+            endif()
+        endif()
+        if(NOT ZMK_CONFIG_BUILD_VERSION)
+            set(ZMK_CONFIG_BUILD_VERSION "")
+        endif()
+
+        # Inject git version of this module
+        execute_process(
+            COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} describe --dirty --always --tags
+            OUTPUT_VARIABLE MODULE_BUILD_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(NOT MODULE_BUILD_VERSION)
+            set(MODULE_BUILD_VERSION "unknown")
+        endif()
+
+        # Inject build timestamp (UTC)
+        string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)
+
+        target_compile_definitions(app PRIVATE
+            ZMK_BUILD_VERSION="${ZMK_BUILD_VERSION}"
+            ZMK_CONFIG_BUILD_VERSION="${ZMK_CONFIG_BUILD_VERSION}"
+            MODULE_BUILD_VERSION="${MODULE_BUILD_VERSION}"
+            BUILD_TIMESTAMP="${BUILD_TIMESTAMP}"
+        )
+
         file(GLOB_RECURSE C_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
         target_sources(app PRIVATE ${C_FILES})
 
