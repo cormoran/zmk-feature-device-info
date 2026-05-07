@@ -11,6 +11,7 @@ This repository contains a ZMK module with Web UI using the **unofficial** custo
 - Update README.md properly to guide how to use the module to unfamiliar ZMK keyboard users. Keep the guide simple but sufficient!
 - Create pull request to origin after finishing the task
 - When implementing new features, follow this order: proto definition → firmware handler → web UI
+- **nanopb sub-message encoding**: In proto3, nanopb generates a `has_<field>` boolean for every sub-message field. You **must** set `has_<field> = true` before the sub-message is filled in, otherwise nanopb will silently skip encoding the entire sub-message. Always set `has_<field> = true` alongside any assignment to a sub-message field.
 
 ## Commands
 

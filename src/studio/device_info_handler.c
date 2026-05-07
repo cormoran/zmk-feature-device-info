@@ -53,6 +53,7 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
     zmk_device_info_DeviceInfoResponse result = zmk_device_info_DeviceInfoResponse_init_zero;
 
     /* Build info */
+    result.has_build = true;
     strncpy(result.build.zmk_version, ZMK_BUILD_VERSION, sizeof(result.build.zmk_version) - 1);
     result.build.zmk_dirty = strstr(result.build.zmk_version, "dirty") != NULL;
 
@@ -73,6 +74,7 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
     strncpy(result.build.board, CONFIG_BOARD, sizeof(result.build.board) - 1);
 
     /* Hardware info */
+    result.has_hardware = true;
 #if IS_ENABLED(CONFIG_HWINFO)
     {
         uint8_t dev_id[16];
@@ -98,6 +100,7 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
     result.zephyr_devices.funcs.encode = encode_zephyr_devices;
 
     /* ZMK config (compile-time Kconfig/DT values) */
+    result.has_zmk_config = true;
 #if DT_HAS_CHOSEN(zmk_kscan)
     /* DT_PROP_BY_IDX for compatible is unreliable; check known types explicitly */
 #if DT_NODE_HAS_COMPAT(DT_CHOSEN(zmk_kscan), zmk_kscan_gpio_matrix)
@@ -140,6 +143,7 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
     result.zmk_config.battery_level_enabled = IS_ENABLED(CONFIG_ZMK_BATTERY_LEVEL_FETCHING);
 
     /* Runtime status */
+    result.has_runtime = true;
     result.runtime.uptime_ms = (uint64_t)k_uptime_get();
 
     resp->which_response_type = zmk_device_info_Response_device_info_tag;
