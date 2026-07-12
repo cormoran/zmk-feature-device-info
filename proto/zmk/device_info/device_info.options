@@ -19,3 +19,10 @@ zmk.device_info.ZmkConfig.kscan_compatible    max_size:64
 zmk.device_info.ZmkConfig.split_role          max_size:16
 
 zmk.device_info.ErrorResponse.message         max_size:64
+
+# PeripheralDeviceInfo.info holds an encoded DeviceInfoResponse relayed from a
+# split peripheral. Sized to match the relay reply buffer
+# (DEVICE_INFO_RELAY_REPLY_DATA_MAX in include/zmk/device_info/relay_events.h);
+# a peripheral's device list is dropped (device_list_truncated=true) if the
+# response would exceed it.
+zmk.device_info.PeripheralDeviceInfo.info     max_size:1024

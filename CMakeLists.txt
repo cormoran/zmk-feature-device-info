@@ -1,6 +1,11 @@
 zephyr_include_directories(include)
 if(CONFIG_ZMK_DEVICE_INFO)
-    if(CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC)
+    # The nanopb-generated proto, the git-version defines, the GNU build-id and
+    # the shared device_info_collect are needed by BOTH the central Studio RPC
+    # handler and the split peripheral relay path (which collects and encodes
+    # the peripheral's own DeviceInfoResponse). The peripheral image has no
+    # ZMK_STUDIO, so this must NOT be gated on it.
+    if(CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC OR CONFIG_ZMK_DEVICE_INFO_SPLIT)
         # Inject git version of ZMK application source
         execute_process(
             COMMAND git -C ${APPLICATION_SOURCE_DIR} describe --dirty --always --tags
@@ -69,8 +74,7 @@ if(CONFIG_ZMK_DEVICE_INFO)
             zephyr_linker_sources(ROM_SECTIONS ${CMAKE_CURRENT_SOURCE_DIR}/src/build_id.ld)
         endif()
 
-        file(GLOB_RECURSE C_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
-        target_sources(app PRIVATE ${C_FILES})
+        target_sources(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/device_info_collect.c)
 
         list(APPEND CMAKE_MODULE_PATH ${ZEPHYR_BASE}/modules/nanopb)
         include(nanopb)
@@ -88,5 +92,19 @@ if(CONFIG_ZMK_DEVICE_INFO)
         # app should depend on the generated proto files
         target_include_directories(app PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/proto)
         add_dependencies(app ${ZEPHYR_CURRENT_LIBRARY})
+    endif()
+
+    if(CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC)
+        file(GLOB_RECURSE STUDIO_C_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/studio/*.c)
+        target_sources(app PRIVATE ${STUDIO_C_FILES})
+    endif()
+
+    # Split event-relay glue: relay a device-info collect request to the
+    # peripheral half/halves and deliver their info back to the PC as RPC
+    # notifications. Compiled on both split roles; the relay macros are
+    # self-role-gating.
+    if(CONFIG_ZMK_DEVICE_INFO_SPLIT)
+        file(GLOB_RECURSE SPLIT_C_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/split/*.c)
+        target_sources(app PRIVATE ${SPLIT_C_FILES})
     endif()
 endif()

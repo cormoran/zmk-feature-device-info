@@ -4,6 +4,16 @@ package zmk.device_info;
 
 message GetDeviceInfoRequest {}
 
+// Ask the split central to collect device info from its connected peripheral
+// half/halves. The central acknowledges immediately with `Ok`; each
+// peripheral's info arrives asynchronously as a PeripheralDeviceInfo
+// notification (a peripheral lives in a separate firmware image, so the central
+// cannot read it directly). `req_id` is echoed back in every notification so a
+// client can correlate replies with the request that triggered them.
+message GetPeripheralDeviceInfoRequest { uint32 req_id = 1; }
+
+message Ok {}
+
 message BuildInfo {
     string zmk_version = 1;
     bool zmk_dirty = 2;
@@ -56,13 +66,31 @@ message DeviceInfoResponse {
 
 message ErrorResponse { string message = 1; }
 
+// Firmware-initiated notification carrying one split peripheral's device info,
+// delivered after a GetPeripheralDeviceInfoRequest. `source` is the peripheral
+// index (1-based; the central is 0), `req_id` echoes the triggering request,
+// and `info` is the encoded DeviceInfoResponse the peripheral produced against
+// its OWN state. `device_list_truncated` is set when the peripheral's Zephyr
+// device list did not fit the split relay frame and was dropped to guarantee
+// the rest of the info still gets through.
+message PeripheralDeviceInfo {
+    uint32 source = 1;
+    uint32 req_id = 2;
+    bool device_list_truncated = 3;
+    bytes info = 4;
+}
+
 message Request {
-    oneof request_type { GetDeviceInfoRequest get_device_info = 1; }
+    oneof request_type {
+        GetDeviceInfoRequest get_device_info = 1;
+        GetPeripheralDeviceInfoRequest get_peripheral_device_info = 2;
+    }
 }
 
 message Response {
     oneof response_type {
         ErrorResponse error = 1;
         DeviceInfoResponse device_info = 2;
+        Ok ok = 3;
     }
 }

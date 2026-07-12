@@ -168,9 +168,20 @@ message DeviceInfoResponse {
 
 message ErrorResponse { string message = 1; }
 
+// Split peripheral relay (see "Split Peripheral Device Info" below)
+message GetPeripheralDeviceInfoRequest { uint32 req_id = 1; }
+message Ok {}
+message PeripheralDeviceInfo {
+    uint32 source                = 1;  // peripheral index (1-based; central is 0)
+    uint32 req_id                = 2;  // echoes the triggering request
+    bool   device_list_truncated = 3;  // zephyr_devices dropped to fit the relay frame
+    bytes  info                  = 4;  // encoded DeviceInfoResponse from the peripheral
+}
+
 message Request {
     oneof request_type {
-        GetDeviceInfoRequest get_device_info = 1;
+        GetDeviceInfoRequest           get_device_info            = 1;
+        GetPeripheralDeviceInfoRequest get_peripheral_device_info = 2;
     }
 }
 
@@ -178,9 +189,13 @@ message Response {
     oneof response_type {
         ErrorResponse      error       = 1;
         DeviceInfoResponse device_info = 2;
+        Ok                 ok          = 3;  // ack for get_peripheral_device_info
     }
 }
 ```
+
+`PeripheralDeviceInfo` is also the payload of the firmware-initiated custom RPC
+notification the central sends per peripheral reply.
 
 ---
 
@@ -213,8 +228,56 @@ message Response {
 
 ---
 
+## Split Peripheral Device Info (event relay)
+
+A split keyboard's two halves run **separate firmware images**, so the central
+cannot read the peripheral's build hash, device list, reset cause, etc.
+directly. This is solved with the ZMK split **event relay** (the same facility
+the custom-settings split RPC relay uses), gated on `CONFIG_ZMK_DEVICE_INFO_SPLIT`.
+
+**Mechanism** (`src/split/device_info_relay.c`, mirroring the kscan-diagnostics
+peripheral-relay design):
+
+- There is only one query (collect device info), so no inner request is relayed.
+  The central broadcasts a `device_info_relay_query` carrier (id `"DIq"`,
+  central→peripheral) with just a `req_id` correlation nonce; the peripheral
+  answers with a `device_info_relay_reply` carrier (id `"DIr"`,
+  peripheral→central).
+- The peripheral builds its own `DeviceInfoResponse` via the shared
+  `device_info_fill()` (`src/device_info_collect.c`, factored out of the Studio
+  handler so it builds with no `ZMK_STUDIO`) and encodes it into the reply. If
+  the response — dominated by the Zephyr device list — does not fit the relay
+  buffer, it drops the device list and sets a `truncated` flag so the rest still
+  gets through.
+- The central re-raises each reply (with `source` stamped to the peripheral
+  index+1) and forwards it to the Studio client as a `PeripheralDeviceInfo`
+  notification `{ source, req_id, device_list_truncated, bytes info }`, where
+  `info` is the encoded `DeviceInfoResponse`. The web UI decodes it and renders
+  the same panel per peripheral.
+
+**Proto additions:** `GetPeripheralDeviceInfoRequest { req_id }` (Request tag 2),
+`Ok` (Response tag 3, the immediate ack), and the top-level `PeripheralDeviceInfo`
+notification message.
+
+**Gotchas / decisions:**
+- The reply struct is copied whole into the relay's reassembly buffer, which is a
+  fixed `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN` (the transport chunks it over the
+  wire but reassembles into one buffer). The module raises the default, but a
+  Kconfig `default` can lose parse-order to ZMK's own default, so a `BUILD_ASSERT`
+  in `relay_events.h` catches an undersized buffer with guidance to set it
+  explicitly on **both halves** (README documents this).
+- The peripheral image has no `ZMK_STUDIO`, so nanopb is not pulled in by it;
+  `CONFIG_ZMK_DEVICE_INFO_SPLIT` and `..._STUDIO_RPC` both `select NANOPB`, and
+  the proto/collect build is gated on `STUDIO_RPC OR SPLIT` (not on Studio).
+- The heavy work (peripheral encode; central notification double-encode) runs on
+  a dedicated `di_relay` work queue, not the shared system work queue the relay
+  receive path runs on, whose stack it would overflow.
+- A peripheral cannot know its own source index, so the query is broadcast to all
+  peripherals; the central-side relay-handle stamps `source`; the client
+  correlates replies by `(source, req_id)`.
+
 ## Open Questions / Future Work
 
 - **zmk-config version when ZMK_CONFIG is unset**: If the user builds without `-DZMK_CONFIG=...` (e.g., in-tree builds), the field will be empty. Could fall back to `APPLICATION_SOURCE_DIR`.
 - **Settings/NVS health**: Could report whether ZMK settings storage initialized successfully. Needs access to settings subsystem internals.
-- **Split peripheral status**: Central-side could report whether each peripheral is connected and its RSSI. Requires cross-half RPC, out of scope for v1.
+- **Peripheral connection / RSSI**: The central could additionally report whether each peripheral is currently connected and its link RSSI (independent of the relay round-trip above).

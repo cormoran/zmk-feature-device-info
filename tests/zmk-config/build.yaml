@@ -13,3 +13,21 @@ include:
     board: xiao_ble//zmk
     shield: tester_xiao
     cmake-args: -DCONFIG_ZMK_DEVICE_INFO=y
+
+  # Split event-relay compile coverage: the relay TU
+  # (src/split/device_info_relay.c) is self-role-gating, so these two artifacts
+  # prove both role paths + the BUILD_ASSERTs compile. tester_xiao is unibody,
+  # so the split role is forced via cmake-args; this is a compile test, not a
+  # functional split (that needs the two-XIAO hardware rig). Both halves set
+  # CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN explicitly to fit the relayed reply
+  # (see include/zmk/device_info/relay_events.h).
+  - artifact: board_split_central
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_DEVICE_INFO=y -DCONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y -DCONFIG_ZMK_DEVICE_INFO_SPLIT=y -DCONFIG_ZMK_SPLIT=y -DCONFIG_ZMK_SPLIT_ROLE_CENTRAL=y -DCONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=1056
+    snippet: studio-rpc-usb-uart
+
+  - artifact: board_split_peripheral
+    board: xiao_ble//zmk
+    shield: tester_xiao
+    cmake-args: -DCONFIG_ZMK_DEVICE_INFO=y -DCONFIG_ZMK_DEVICE_INFO_SPLIT=y -DCONFIG_ZMK_SPLIT=y -DCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n -DCONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=1056
