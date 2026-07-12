@@ -212,6 +212,7 @@ function DeviceInfoDisplay({ info }: { info: DeviceInfoResponse }) {
               <InfoRow label="Zephyr Version" value={build.zephyrVersion} />
               <InfoRow label="Build Timestamp" value={build.buildTimestamp} />
               <InfoRow label="Board" value={build.board} />
+              <InfoRow label="Build Hash" value={build.buildHash} />
             </tbody>
           </table>
         </details>

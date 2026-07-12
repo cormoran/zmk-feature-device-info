@@ -23,6 +23,7 @@ Answers: *"Which firmware is this keyboard running?"*
 | `zephyr_version` | `KERNEL_VERSION_STRING` (from `version.h`) | e.g. `"4.1.0"` |
 | `build_timestamp` | CMake-injected `BUILD_TIMESTAMP` | ISO-8601 string, e.g. `"2025-05-01T12:34:56"` |
 | `board` | `CONFIG_BOARD` Kconfig string | e.g. `"xiao_ble"` |
+| `build_hash` | GNU build-id read from `.note.gnu.build-id` | SHA1 of the linked image (hex); uniquely identifies the ELF/binary; empty if unavailable |
 
 **zmk-config version injection:**
 ZMK's build system exposes the config directory as the `ZMK_CONFIG` CMake variable (set by `west zmk-build` / `west build -d ... -- -DZMK_CONFIG=...`). The module's CMakeLists.txt runs `git -C ${ZMK_CONFIG} describe --dirty --always --tags` at configure time and injects the result as the `ZMK_CONFIG_BUILD_VERSION` compile definition. If `ZMK_CONFIG` is not set or is not a git repo, the field is left empty.
@@ -32,6 +33,10 @@ ZMK's build system exposes the config directory as the `ZMK_CONFIG` CMake variab
 - `zephyr_version`: Many issues are Zephyr-version-specific (API changes, HAL bugs).
 - `build_timestamp`: Confirms which build is running even when the git hash alone is ambiguous.
 - `board`: Allows the support person to instantly know the hardware target without asking.
+- `build_hash`: The git hashes describe *source* revisions but do not uniquely identify the *binary* (a "dirty" tree, different toolchain, or config change all produce the same describe output). The GNU build-id is a SHA1 of the actual linked image, so it uniquely names the ELF — letting you pick the matching artifact (with symbols) for crash/error analysis.
+
+**build_hash injection (GNU build-id):**
+Zephyr disables build-id by default (`--build-id=none` in the linker `base` property). The module's `CMakeLists.txt` re-enables it with `zephyr_link_libraries(-Wl,--build-id=sha1)`; because module CMake is processed *after* Zephyr appends its `base` flags on the final link line, and `ld` honors the last `--build-id`, the module's flag wins. A `ROM_SECTIONS` linker snippet (`src/build_id.ld`) pins the resulting `.note.gnu.build-id` into the flash (ROMABLE) region with `__build_id_note_start` / `__build_id_note_end` boundary symbols — otherwise the orphan note can be assigned address 0. The handler parses the ELF note at runtime and hex-encodes the descriptor. The boundary symbols always exist, so builds without build-id emission (e.g. the note range is empty) simply report an empty hash. Works on the nRF52840 / Adafruit UF2 bootloader: the note is ordinary flash rodata inside the app image, so it is included in the `.uf2` and is directly memory-mapped for reading.
 
 ---
 
@@ -121,6 +126,7 @@ message BuildInfo {
     string zephyr_version      = 7;  // e.g. "4.1.0"
     string build_timestamp     = 8;  // ISO-8601 build time
     string board               = 9;  // CONFIG_BOARD string
+    string build_hash          = 10; // GNU build-id (SHA1 of image, hex)
 }
 
 message HardwareInfo {

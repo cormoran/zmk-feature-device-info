@@ -15,6 +15,68 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+/*
+ * GNU build-id note. On real hardware it is emitted by the linker and pinned
+ * into flash by src/build_id.ld (see CMakeLists.txt). It is skipped on
+ * native_sim/posix, where there is no flash image to match and the native link
+ * discards the note section, so we compile out the reader there.
+ */
+#if !IS_ENABLED(CONFIG_ARCH_POSIX)
+
+/*
+ * The linker always defines these boundary symbols; when build-id emission is
+ * disabled the range is empty (start == end) and we simply report no hash.
+ */
+extern const uint8_t __build_id_note_start[];
+extern const uint8_t __build_id_note_end[];
+
+struct build_id_note {
+    uint32_t namesz; /* size of the note name (e.g. "GNU\0") */
+    uint32_t descsz; /* size of the descriptor (the build-id bytes) */
+    uint32_t type;   /* NT_GNU_BUILD_ID == 3 */
+    uint8_t data[];  /* name (namesz, 4-byte aligned) then descriptor (descsz) */
+};
+
+#define NT_GNU_BUILD_ID 3
+
+/* Hex-encode the build-id descriptor into out (out_size includes the null). */
+static void fill_build_hash(char *out, size_t out_size) {
+    if (out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    size_t note_bytes = (size_t)(__build_id_note_end - __build_id_note_start);
+    if (note_bytes < sizeof(struct build_id_note)) {
+        return;
+    }
+
+    const struct build_id_note *note = (const struct build_id_note *)__build_id_note_start;
+    if (note->type != NT_GNU_BUILD_ID) {
+        return;
+    }
+
+    /* The note name is padded to a 4-byte boundary; the descriptor follows. */
+    const uint8_t *desc = note->data + ROUND_UP(note->namesz, 4);
+    if (desc + note->descsz > __build_id_note_end) {
+        return;
+    }
+
+    for (size_t i = 0; i < note->descsz && (i * 2 + 2) < out_size; i++) {
+        snprintf(out + i * 2, 3, "%02x", desc[i]);
+    }
+}
+
+#else
+
+static void fill_build_hash(char *out, size_t out_size) {
+    if (out_size > 0) {
+        out[0] = '\0';
+    }
+}
+
+#endif /* !CONFIG_ARCH_POSIX */
+
 static struct zmk_rpc_custom_subsystem_meta device_info_meta = {
     ZMK_RPC_CUSTOM_SUBSYSTEM_UI_URLS("http://cormoran.github.io/zmk-feature-device-info/"),
     .security = ZMK_STUDIO_RPC_HANDLER_UNSECURED,
@@ -72,6 +134,8 @@ static int handle_get_device_info(const zmk_device_info_GetDeviceInfoRequest *re
             sizeof(result.build.build_timestamp) - 1);
 
     strncpy(result.build.board, CONFIG_BOARD, sizeof(result.build.board) - 1);
+
+    fill_build_hash(result.build.build_hash, sizeof(result.build.build_hash));
 
     /* Hardware info */
     result.has_hardware = true;

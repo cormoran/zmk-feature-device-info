@@ -6,7 +6,23 @@ from pathlib import Path
 
 from dataclasses import dataclass
 
+from elftools.elf.elffile import ELFFile
+from elftools.elf.sections import NoteSection
+
 THIS_DIR = Path(__file__).parent.resolve()
+
+
+def read_build_id(elf_path: Path) -> str | None:
+    """Return the GNU build-id (hex) embedded in an ELF, or None if absent."""
+    with open(elf_path, "rb") as f:
+        elf = ELFFile(f)
+        for section in elf.iter_sections():
+            if not isinstance(section, NoteSection):
+                continue
+            for note in section.iter_notes():
+                if note["n_type"] == "NT_GNU_BUILD_ID":
+                    return note["n_desc"]
+    return None
 
 
 def run_west(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -84,6 +100,26 @@ class WestCommandsTests(unittest.TestCase):
                     device=[],
                 ),
             }
+        )
+
+        # The RPC feature enables a GNU build-id so a running device can be
+        # matched back to its ELF; it must be present (SHA1 => 40 hex chars) in
+        # that artifact and absent when the RPC feature is off.
+        rpc_elf = self.BUILD_DIR / "board_with_device_info_rpc" / "zephyr" / "zmk.elf"
+        self.assertTrue(rpc_elf.exists(), f"{rpc_elf} is missing")
+        rpc_build_id = read_build_id(rpc_elf)
+        self.assertIsNotNone(
+            rpc_build_id, "build-id note missing from RPC firmware ELF"
+        )
+        self.assertEqual(
+            len(rpc_build_id), 40, f"expected SHA1 build-id, got: {rpc_build_id}"
+        )
+
+        no_rpc_elf = self.BUILD_DIR / "board_without_rpc" / "zephyr" / "zmk.elf"
+        self.assertTrue(no_rpc_elf.exists(), f"{no_rpc_elf} is missing")
+        self.assertIsNone(
+            read_build_id(no_rpc_elf),
+            "build-id note should be absent when RPC feature is disabled",
         )
 
     def _test_zmk_build(
