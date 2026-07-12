@@ -14,6 +14,9 @@ message BuildInfo {
     string zephyr_version = 7;
     string build_timestamp = 8;
     string board = 9;
+    // GNU build-id (SHA1 of the linked image, hex). Uniquely identifies the
+    // ELF/binary this firmware was built from. Empty if unavailable.
+    string build_hash = 10;
 }
 
 message HardwareInfo {

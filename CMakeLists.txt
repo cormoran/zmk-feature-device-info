@@ -54,6 +54,21 @@ if(CONFIG_ZMK_DEVICE_INFO)
             BUILD_TIMESTAMP="${BUILD_TIMESTAMP}"
         )
 
+        # Emit a GNU build-id (SHA1 of the linked image) so a running device can
+        # be matched back to the exact ELF for crash/error analysis. Zephyr sets
+        # `--build-id=none` in its linker `base` property; modules are processed
+        # after that on the final link line, so this later flag wins (ld honors
+        # the last --build-id). build_id.ld pins the note into flash so it ships
+        # in the image and can be read at runtime.
+        #
+        # Skipped on native_sim/posix: it is a host executable (no flash image to
+        # match, and no ELF error analysis) and its two-stage native link discards
+        # the .note.gnu.build-id section, which would dangle the boundary symbols.
+        if(NOT CONFIG_ARCH_POSIX)
+            zephyr_link_libraries(-Wl,--build-id=sha1)
+            zephyr_linker_sources(ROM_SECTIONS ${CMAKE_CURRENT_SOURCE_DIR}/src/build_id.ld)
+        endif()
+
         file(GLOB_RECURSE C_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
         target_sources(app PRIVATE ${C_FILES})
 

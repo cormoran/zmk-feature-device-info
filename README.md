@@ -9,7 +9,7 @@ A ZMK module that exposes keyboard diagnostic information via the **unofficial**
 
 | Section | Contents |
 |---------|----------|
-| **Build** | ZMK git hash, zmk-config git hash, this module's git hash, Zephyr version, build timestamp, board name. Each version shows a "dirty" warning if the source had uncommitted changes at build time. |
+| **Build** | ZMK git hash, zmk-config git hash, this module's git hash, Zephyr version, build timestamp, board name, and a **build hash**. Each version shows a "dirty" warning if the source had uncommitted changes at build time. |
 | **Hardware** | MCU hardware unique ID, last reset cause (Power-On / Watchdog / Brownout / etc.), flash and SRAM size. |
 | **ZMK Configuration** | KScan driver type, BLE/USB/split/display/RGB/backlight flags. |
 | **Runtime** | Uptime since last boot. |
@@ -60,6 +60,13 @@ Or run locally: see [web/README.md](./web/README.md).
 
 - **zmk-config version**: The module automatically reads the git hash of your zmk-config directory at build time (via the `ZMK_CONFIG` CMake variable set by `west build`). No extra setup is needed.
 - **Hardware unique ID / reset cause**: Requires `CONFIG_HWINFO=y` (enabled automatically when supported by the board).
+- **Build hash**: A [GNU build-id](https://interrupt.memfault.com/blog/gnu-build-id-for-firmware) — a SHA1 of the linked firmware image — is embedded in flash and reported here. It uniquely identifies the exact binary a device is running, so you can match a keyboard back to the matching ELF for crash/error analysis. Find the same value in a build artifact with:
+
+  ```bash
+  readelf -n build/zephyr/zmk.elf   # look for the "Build ID" line
+  ```
+
+  The module enables the build-id automatically (Zephyr disables it by default) whenever the Studio RPC feature is on; no configuration is required.
 
 ## Development
 
