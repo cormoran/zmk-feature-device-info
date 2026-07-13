@@ -66,18 +66,39 @@ message DeviceInfoResponse {
 
 message ErrorResponse { string message = 1; }
 
-// Firmware-initiated notification carrying one split peripheral's device info,
-// delivered after a GetPeripheralDeviceInfoRequest. `source` is the peripheral
-// index (1-based; the central is 0), `req_id` echoes the triggering request,
-// and `info` is the encoded DeviceInfoResponse the peripheral produced against
-// its OWN state. `device_list_truncated` is set when the peripheral's Zephyr
-// device list did not fit the split relay frame and was dropped to guarantee
-// the rest of the info still gets through.
+// One page of the Zephyr device list, sent as the payload of a
+// PERIPHERAL_INFO_KIND_DEVICES notification. The list is paged so each split
+// relay frame stays small; `last_page` marks the final page.
+message ZephyrDevicePage {
+    repeated ZephyrDevice devices = 1;
+    bool last_page = 2;
+}
+
+// Firmware-initiated notification carrying ONE group of a split peripheral's
+// device info, delivered after a GetPeripheralDeviceInfoRequest. The peripheral's
+// device info is split into small groups and relayed one notification at a time
+// so each split relay frame stays within CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN
+// (kept small on purpose).
+//
+// `source` is the peripheral index (1-based; the central is 0), `req_id` echoes
+// the triggering request, `last` is set on the final notification for this
+// source so a client knows the collection is complete, and `kind` says which
+// group `payload` holds (see device_info_peripheral_info_kind in
+// include/zmk/device_info/relay_events.h — a plain uint32 rather than a proto
+// enum to keep the generated TS free of runtime enum syntax):
+//   1 = BUILD      -> payload = BuildInfo
+//   2 = HARDWARE   -> payload = HardwareInfo
+//   3 = ZMK_CONFIG -> payload = ZmkConfig
+//   4 = RUNTIME    -> payload = RuntimeStatus
+//   5 = DEVICES    -> payload = ZephyrDevicePage
+// A peripheral emits one notification per group (build, hardware, config,
+// runtime) plus one per device-list page.
 message PeripheralDeviceInfo {
     uint32 source = 1;
     uint32 req_id = 2;
-    bool device_list_truncated = 3;
-    bytes info = 4;
+    uint32 kind = 3;
+    bytes payload = 4;
+    bool last = 5;
 }
 
 message Request {

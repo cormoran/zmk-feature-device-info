@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <pb_encode.h>
+#include <zephyr/device.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -43,13 +44,14 @@ ZMK_RELAY_EVENT_HANDLE(device_info_relay_reply, DIr, source)
  *
  * The relay carriers are re-raised locally by ZMK_RELAY_EVENT_HANDLE from the
  * split relay-receive path, which runs on the SYSTEM work queue. Answering a
- * query (peripheral: collect + encode) and -- worse -- raising a Studio
- * notification (central: raise_zmk_studio_custom_notification builds a full
- * zmk_studio_Notification AND zmk_studio_Response and runs a double pb_encode,
- * all synchronously) needs far more stack than the ~2 KB system work queue has
- * spare after the BLE receive path. Doing it there overflows the sysworkq stack.
- * So the event listeners below only copy the carrier into a msgq and kick this
- * queue; the real work runs here with an RPC-thread-sized stack.
+ * query (peripheral: collect + a series of pb_encodes, blocking on the split TX
+ * queue between frames) and -- worse -- raising a Studio notification (central:
+ * raise_zmk_studio_custom_notification builds a full zmk_studio_Notification AND
+ * zmk_studio_Response and runs a double pb_encode, all synchronously) needs far
+ * more stack than the ~2 KB system work queue has spare after the BLE receive
+ * path. Doing it there overflows the sysworkq stack. So the event listeners
+ * below only copy the carrier into a msgq and kick this queue; the real work
+ * runs here with an RPC-thread-sized stack.
  */
 static K_THREAD_STACK_DEFINE(device_info_relay_stack, CONFIG_ZMK_DEVICE_INFO_RELAY_STACK_SIZE);
 static struct k_work_q device_info_relay_workq;
@@ -69,47 +71,93 @@ SYS_INIT(device_info_relay_workq_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIO
 /*
  * Peripheral side: a relayed query re-raised locally by
  * ZMK_RELAY_EVENT_HANDLE(device_info_relay_query). Answer it -- against THIS
- * peripheral's own build/hardware/config/device state -- on the relay work
- * queue and raise a reply (relayed back to the central).
+ * peripheral's own state -- on the relay work queue by emitting a SEQUENCE of
+ * small replies (one per info group, plus paged device-list frames), each of
+ * which the central turns into a PeripheralDeviceInfo notification. Splitting
+ * the info this way keeps every relay frame small (within a 256 B DATA_LEN)
+ * instead of shipping one large DeviceInfoResponse.
  *
  * The work queue is single-threaded and drains the msgq serially, so the static
- * scratch buffers below need no extra locking and keep the work-queue stack
- * free for the pb_encode.
+ * scratch buffers below need no extra locking and keep the work-queue stack free
+ * for the pb_encode.
  */
 K_MSGQ_DEFINE(device_info_relay_query_msgq, sizeof(struct device_info_relay_query), 2, 4);
 
 static zmk_device_info_DeviceInfoResponse answer_resp;
+static zmk_device_info_ZephyrDevicePage answer_page;
 static struct device_info_relay_reply answer_reply;
 static struct device_info_relay_query answer_query;
+
+// Encode one group message into answer_reply and relay it back to the central.
+static void relay_send_group(uint8_t kind, const pb_msgdesc_t *fields, const void *msg, bool last) {
+    answer_reply.source = ZMK_RELAY_EVENT_SOURCE_SELF;
+    answer_reply.req_id = answer_query.req_id;
+    answer_reply.kind = kind;
+    answer_reply.last = last ? 1 : 0;
+
+    pb_ostream_t os = pb_ostream_from_buffer(answer_reply.data, sizeof(answer_reply.data));
+    if (!pb_encode(&os, fields, msg)) {
+        // Groups are sized to fit the frame; a failure here means this group's
+        // fields exceeded the buffer. Skip just this group so the rest still
+        // gets through (the client renders whatever groups it received).
+        LOG_WRN("Skipping peripheral device info group %u: encode failed (%s)", kind,
+                PB_GET_ERROR(&os));
+        return;
+    }
+    answer_reply.len = (uint16_t)os.bytes_written;
+    raise_device_info_relay_reply(answer_reply);
+}
+
+// Relay the Zephyr device list as one or more paged DEVICES frames. The final
+// frame carries `last` to mark the end of the whole collection.
+static void relay_send_device_pages(void) {
+    const struct device *devices;
+    size_t count = z_device_get_all_static(&devices);
+
+    size_t total_named = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (devices[i].name) {
+            total_named++;
+        }
+    }
+
+    size_t i = 0;
+    size_t emitted = 0;
+    do {
+        answer_page = (zmk_device_info_ZephyrDevicePage)zmk_device_info_ZephyrDevicePage_init_zero;
+        while (answer_page.devices_count < DEVICE_INFO_RELAY_DEVICES_PER_PAGE && i < count) {
+            if (!devices[i].name) {
+                i++;
+                continue;
+            }
+            zmk_device_info_ZephyrDevice *slot = &answer_page.devices[answer_page.devices_count];
+            strncpy(slot->name, devices[i].name, sizeof(slot->name) - 1);
+            slot->ready = device_is_ready(&devices[i]);
+            answer_page.devices_count++;
+            emitted++;
+            i++;
+        }
+        answer_page.last_page = emitted >= total_named;
+        relay_send_group(DEVICE_INFO_KIND_DEVICES, zmk_device_info_ZephyrDevicePage_fields,
+                         &answer_page, answer_page.last_page);
+    } while (emitted < total_named);
+}
 
 static void device_info_relay_answer_work(struct k_work *work) {
     ARG_UNUSED(work);
     while (k_msgq_get(&device_info_relay_query_msgq, &answer_query, K_NO_WAIT) == 0) {
-        answer_reply = (struct device_info_relay_reply){
-            .source = ZMK_RELAY_EVENT_SOURCE_SELF,
-            .req_id = answer_query.req_id,
-        };
-
         device_info_fill(&answer_resp);
 
-        pb_ostream_t os = pb_ostream_from_buffer(answer_reply.data, sizeof(answer_reply.data));
-        if (!pb_encode(&os, zmk_device_info_DeviceInfoResponse_fields, &answer_resp)) {
-            // The Zephyr device list can be long; if the full response does not
-            // fit the relay reply buffer, drop the list and report the rest so
-            // the client still gets build/hardware/config/runtime info.
-            LOG_WRN("Peripheral device info too large for relay (%s); dropping device list",
-                    PB_GET_ERROR(&os));
-            answer_resp.zephyr_devices.funcs.encode = NULL;
-            answer_reply.truncated = 1;
-            os = pb_ostream_from_buffer(answer_reply.data, sizeof(answer_reply.data));
-            if (!pb_encode(&os, zmk_device_info_DeviceInfoResponse_fields, &answer_resp)) {
-                LOG_ERR("Failed to encode peripheral device info reply: %s", PB_GET_ERROR(&os));
-                continue;
-            }
-        }
-        answer_reply.len = (uint16_t)os.bytes_written;
-
-        raise_device_info_relay_reply(answer_reply);
+        relay_send_group(DEVICE_INFO_KIND_BUILD, zmk_device_info_BuildInfo_fields,
+                         &answer_resp.build, false);
+        relay_send_group(DEVICE_INFO_KIND_HARDWARE, zmk_device_info_HardwareInfo_fields,
+                         &answer_resp.hardware, false);
+        relay_send_group(DEVICE_INFO_KIND_ZMK_CONFIG, zmk_device_info_ZmkConfig_fields,
+                         &answer_resp.zmk_config, false);
+        relay_send_group(DEVICE_INFO_KIND_RUNTIME, zmk_device_info_RuntimeStatus_fields,
+                         &answer_resp.runtime, false);
+        // Device pages carry the final `last` marker for the whole collection.
+        relay_send_device_pages();
     }
 }
 
@@ -167,7 +215,7 @@ static bool device_info_relay_encode_peripheral_event(pb_ostream_t *stream, cons
         stream, field, zmk_device_info_PeripheralDeviceInfo_fields, event);
 }
 
-K_MSGQ_DEFINE(device_info_relay_reply_msgq, sizeof(struct device_info_relay_reply), 2, 4);
+K_MSGQ_DEFINE(device_info_relay_reply_msgq, sizeof(struct device_info_relay_reply), 4, 4);
 
 static struct device_info_relay_reply notify_reply;
 static zmk_device_info_PeripheralDeviceInfo notify_event;
@@ -181,13 +229,14 @@ static void device_info_relay_notify_work(struct k_work *work) {
             continue;
         }
 
-        notify_event = (zmk_device_info_PeripheralDeviceInfo)
-            zmk_device_info_PeripheralDeviceInfo_init_zero;
+        notify_event =
+            (zmk_device_info_PeripheralDeviceInfo)zmk_device_info_PeripheralDeviceInfo_init_zero;
         notify_event.source = notify_reply.source;
         notify_event.req_id = notify_reply.req_id;
-        notify_event.device_list_truncated = notify_reply.truncated != 0;
-        notify_event.info.size = MIN(notify_reply.len, sizeof(notify_event.info.bytes));
-        memcpy(notify_event.info.bytes, notify_reply.data, notify_event.info.size);
+        notify_event.kind = notify_reply.kind;
+        notify_event.last = notify_reply.last != 0;
+        notify_event.payload.size = MIN(notify_reply.len, sizeof(notify_event.payload.bytes));
+        memcpy(notify_event.payload.bytes, notify_reply.data, notify_event.payload.size);
 
         // encode runs inline within raise_zmk_studio_custom_notification, so
         // pointing at the (static) notify_event is safe.

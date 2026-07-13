@@ -45,14 +45,14 @@ config ZMK_DEVICE_INFO_RELAY_STACK_SIZE
       (CONFIG_ZMK_STUDIO_RPC_THREAD_STACK_SIZE=4096). Raise it if you see a
       stack overflow in the "di_relay" thread.
 
-# A relayed reply carries an encoded DeviceInfoResponse (see
-# DEVICE_INFO_RELAY_REPLY_DATA_MAX in include/zmk/device_info/relay_events.h).
-# Raise the reassembled relay payload ceiling to fit it; the relay transport
-# chunks it across the split link automatically. If this default does not take
-# effect for your build, set CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN explicitly on
+# Peripheral device info is relayed one small group at a time (build, hardware,
+# config, runtime, and paged device-list frames), so each reply fits a 256 B
+# frame (see DEVICE_INFO_RELAY_REPLY_DATA_MAX in
+# include/zmk/device_info/relay_events.h). If this default does not take effect
+# for your build, set CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=256 explicitly on
 # BOTH halves -- relay_events.h BUILD_ASSERTs it.
 config ZMK_SPLIT_RELAY_EVENT_DATA_LEN
-    default 1056
+    default 256
 
 endif
 

@@ -77,19 +77,15 @@ CONFIG_ZMK_DEVICE_INFO_SPLIT=y
 The central additionally needs `CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y` (to deliver
 the peripheral info to the web UI); the peripheral needs no ZMK Studio.
 
-The relayed reply carries the peripheral's encoded `DeviceInfoResponse`, which
-the split relay reassembles into a single buffer. If your peripheral's Zephyr
-device list is unusually long, the reply may not fit the default relay buffer;
-the peripheral then drops just the device list (the UI marks it
-*device list truncated*) so the rest still gets through. To keep the full list,
-raise the buffer on **both halves**:
-
-```conf
-CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=1056   # or larger; must match on both halves
-```
+To keep each relayed frame small, the peripheral sends its info back **one group
+at a time** — build, hardware, config, runtime, and the Zephyr device list in
+pages — instead of one large message. The web UI assembles the groups as they
+arrive. Every frame fits a small relay buffer, so this module keeps
+`CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN` at **256** (no need to raise it).
 
 > If a build fails with a `BUILD_ASSERT` about `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN`,
-> set it explicitly as above — a Kconfig `default` can lose to ZMK's own default.
+> set `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=256` explicitly on **both halves** —
+> a Kconfig `default` can lose to ZMK's own default.
 
 ## Notes
 

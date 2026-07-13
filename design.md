@@ -171,11 +171,16 @@ message ErrorResponse { string message = 1; }
 // Split peripheral relay (see "Split Peripheral Device Info" below)
 message GetPeripheralDeviceInfoRequest { uint32 req_id = 1; }
 message Ok {}
+message ZephyrDevicePage {           // one page of the device list
+    repeated ZephyrDevice devices = 1;
+    bool last_page = 2;
+}
 message PeripheralDeviceInfo {
-    uint32 source                = 1;  // peripheral index (1-based; central is 0)
-    uint32 req_id                = 2;  // echoes the triggering request
-    bool   device_list_truncated = 3;  // zephyr_devices dropped to fit the relay frame
-    bytes  info                  = 4;  // encoded DeviceInfoResponse from the peripheral
+    uint32 source  = 1;  // peripheral index (1-based; central is 0)
+    uint32 req_id  = 2;  // echoes the triggering request
+    uint32 kind    = 3;  // 1=BUILD 2=HARDWARE 3=ZMK_CONFIG 4=RUNTIME 5=DEVICES
+    bytes  payload = 4;  // encoded group message selected by kind
+    bool   last    = 5;  // set on the final notification for this source
 }
 
 message Request {
@@ -195,7 +200,7 @@ message Response {
 ```
 
 `PeripheralDeviceInfo` is also the payload of the firmware-initiated custom RPC
-notification the central sends per peripheral reply.
+notification the central sends per peripheral group reply.
 
 ---
 
@@ -241,31 +246,48 @@ peripheral-relay design):
 - There is only one query (collect device info), so no inner request is relayed.
   The central broadcasts a `device_info_relay_query` carrier (id `"DIq"`,
   central→peripheral) with just a `req_id` correlation nonce; the peripheral
-  answers with a `device_info_relay_reply` carrier (id `"DIr"`,
+  answers with a **series** of `device_info_relay_reply` carriers (id `"DIr"`,
   peripheral→central).
-- The peripheral builds its own `DeviceInfoResponse` via the shared
-  `device_info_fill()` (`src/device_info_collect.c`, factored out of the Studio
-  handler so it builds with no `ZMK_STUDIO`) and encodes it into the reply. If
-  the response — dominated by the Zephyr device list — does not fit the relay
-  buffer, it drops the device list and sets a `truncated` flag so the rest still
-  gets through.
+- **The reply is split into small groups to keep each relay frame ≤ 256 bytes**,
+  rather than shipping one large `DeviceInfoResponse`. The peripheral collects
+  its info once via the shared `device_info_fill()` (`src/device_info_collect.c`,
+  factored out of the Studio handler so it builds with no `ZMK_STUDIO`) and then
+  emits one reply per group: `BUILD` (BuildInfo), `HARDWARE` (HardwareInfo),
+  `ZMK_CONFIG` (ZmkConfig), `RUNTIME` (RuntimeStatus), and one or more `DEVICES`
+  frames — the Zephyr device list is **paged** at
+  `DEVICE_INFO_RELAY_DEVICES_PER_PAGE` (5) entries per frame. Each reply carries
+  a `kind` discriminator, the encoded group message, and a `last` flag set on the
+  final frame.
 - The central re-raises each reply (with `source` stamped to the peripheral
   index+1) and forwards it to the Studio client as a `PeripheralDeviceInfo`
-  notification `{ source, req_id, device_list_truncated, bytes info }`, where
-  `info` is the encoded `DeviceInfoResponse`. The web UI decodes it and renders
-  the same panel per peripheral.
+  notification `{ source, req_id, kind, bytes payload, last }`. The web UI
+  decodes `payload` per `kind`, accumulates the groups into a
+  `DeviceInfoResponse` keyed by `source`, and renders a panel per peripheral;
+  `last` marks the collection complete.
 
 **Proto additions:** `GetPeripheralDeviceInfoRequest { req_id }` (Request tag 2),
-`Ok` (Response tag 3, the immediate ack), and the top-level `PeripheralDeviceInfo`
-notification message.
+`Ok` (Response tag 3, the immediate ack), `ZephyrDevicePage`, and the top-level
+`PeripheralDeviceInfo` notification message. `kind` is a plain `uint32` (values
+mirrored by the `device_info_peripheral_info_kind` C enum) rather than a proto
+`enum`, so the generated web TS stays free of runtime enum syntax (the web build
+uses `erasableSyntaxOnly`).
 
 **Gotchas / decisions:**
-- The reply struct is copied whole into the relay's reassembly buffer, which is a
-  fixed `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN` (the transport chunks it over the
-  wire but reassembles into one buffer). The module raises the default, but a
-  Kconfig `default` can lose parse-order to ZMK's own default, so a `BUILD_ASSERT`
-  in `relay_events.h` catches an undersized buffer with guidance to set it
-  explicitly on **both halves** (README documents this).
+- Each reply struct is copied whole into the relay's reassembly buffer, a fixed
+  `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN` (the transport chunks it over the wire
+  but reassembles into one buffer). Because the info is grouped and the device
+  list paged, the buffer stays at **256**. The largest single group is BuildInfo
+  (a few hundred bytes of git-describe strings in the worst case, ~200 in
+  practice) or a 5-device page (~190 B). A `BUILD_ASSERT` in `relay_events.h`
+  catches an undersized buffer (a Kconfig `default` can lose parse-order to ZMK's
+  own) with guidance to set `=256` explicitly on **both halves** (README
+  documents this).
+- If a single group ever exceeds the frame (only BuildInfo could, with
+  pathologically long version strings), that one group's notification is skipped
+  and logged; the rest still arrive.
+- Sending a burst of ~4 + ⌈devices/5⌉ frames is absorbed by the split transport's
+  relay TX queue (depth 10, 100 ms blocking backpressure); the sends run on the
+  dedicated `di_relay` work queue, so blocking there is harmless.
 - The peripheral image has no `ZMK_STUDIO`, so nanopb is not pulled in by it;
   `CONFIG_ZMK_DEVICE_INFO_SPLIT` and `..._STUDIO_RPC` both `select NANOPB`, and
   the proto/collect build is gated on `STUDIO_RPC OR SPLIT` (not on Studio).
