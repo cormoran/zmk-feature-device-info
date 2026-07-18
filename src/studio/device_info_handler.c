@@ -79,7 +79,11 @@ static void fill_build_hash(char *out, size_t out_size) {
 
 static struct zmk_rpc_custom_subsystem_meta device_info_meta = {
     ZMK_RPC_CUSTOM_SUBSYSTEM_UI_URLS("http://cormoran.github.io/zmk-feature-device-info/"),
+#if IS_ENABLED(CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK)
+    .security = ZMK_STUDIO_RPC_HANDLER_SECURED,
+#else
     .security = ZMK_STUDIO_RPC_HANDLER_UNSECURED,
+#endif
 };
 
 ZMK_RPC_CUSTOM_SUBSYSTEM(zmk__device_info, &device_info_meta, device_info_rpc_handle_request);
