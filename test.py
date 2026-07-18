@@ -67,6 +67,9 @@ class WestCommandsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS: test", result.stdout, result.stdout + result.stderr)
         self.assertIn("PASS: studio", result.stdout, result.stdout + result.stderr)
+        self.assertIn(
+            "PASS: studio_unsecured", result.stdout, result.stdout + result.stderr
+        )
         self.assertNotIn("FAILED: ", result.stdout, result.stdout + result.stderr)
 
     def test_zmk_build(self):
@@ -88,6 +91,8 @@ class WestCommandsTests(unittest.TestCase):
                         "CONFIG_ZMK_STUDIO=y",
                         "CONFIG_ZMK_DEVICE_INFO=y",
                         "CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y",
+                        # A Studio unlock is required to read device info by default.
+                        "CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK=y",
                     ],
                     device=[],
                 ),

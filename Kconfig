@@ -7,4 +7,16 @@ config ZMK_DEVICE_INFO_STUDIO_RPC
     bool "Enable ZMK device info custom Studio RPC"
     depends on ZMK_STUDIO
 
+config ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK
+    bool "Require a Studio unlock to read device info"
+    depends on ZMK_DEVICE_INFO_STUDIO_RPC
+    default y
+    help
+      When enabled (the default), the device info RPC subsystem is marked
+      "secured": a connected Studio client must unlock the keyboard before it
+      can read any device info (build/hardware/config/runtime). When disabled,
+      the subsystem is "unsecured" and device info can be read without an
+      unlock -- handy for headless diagnostics, but it exposes build and
+      hardware details to any Studio-capable host that can reach the keyboard.
+
 endif

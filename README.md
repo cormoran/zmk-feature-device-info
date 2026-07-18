@@ -47,6 +47,10 @@ CONFIG_ZMK_DEVICE_INFO=y
 # Enable the web UI RPC (requires ZMK Studio)
 CONFIG_ZMK_STUDIO=y
 CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y
+
+# Optional: allow reading device info without unlocking Studio first.
+# By default a Studio unlock is required before any device info can be read.
+# CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK=n
 ```
 
 ### 3. Open the web UI
