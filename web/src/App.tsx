@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { connect as serial_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
 import {
@@ -10,10 +10,27 @@ import {
   Request,
   Response,
   DeviceInfoResponse,
+  PeripheralDeviceInfo,
+  BuildInfo,
+  HardwareInfo,
+  ZmkConfig,
+  RuntimeStatus,
+  ZephyrDevicePage,
 } from "./proto/zmk/device_info/device_info";
 import type { RpcConnection } from "@zmkfirmware/zmk-studio-ts-client";
 
 export const SUBSYSTEM_IDENTIFIER = "zmk__device_info";
+
+// PeripheralDeviceInfo.kind values (wire contract shared with the firmware's
+// device_info_peripheral_info_kind enum; a plain uint32 rather than a proto
+// enum so the generated TS stays free of runtime enum syntax).
+const PeripheralInfoKind = {
+  BUILD: 1,
+  HARDWARE: 2,
+  ZMK_CONFIG: 3,
+  RUNTIME: 4,
+  DEVICES: 5,
+} as const;
 
 function App() {
   return (
@@ -55,6 +72,7 @@ function App() {
               </button>
             </section>
             <DeviceInfoPanel />
+            <PeripheralInfoPanel />
           </>
         )}
       />
@@ -178,6 +196,172 @@ export function DeviceInfoPanel() {
       )}
       {isLoading && <p>Loading...</p>}
       {info && <DeviceInfoDisplay info={info} />}
+    </section>
+  );
+}
+
+// A peripheral's device info is streamed back one group at a time, so we
+// accumulate the groups into a partial DeviceInfoResponse per source.
+type PeripheralEntry = {
+  source: number;
+  info: DeviceInfoResponse;
+  complete: boolean;
+};
+
+// Merge one PeripheralDeviceInfo group notification into the accumulated entry.
+function applyGroup(
+  entry: PeripheralEntry,
+  pdi: PeripheralDeviceInfo
+): PeripheralEntry {
+  const info: DeviceInfoResponse = { ...entry.info };
+  switch (pdi.kind) {
+    case PeripheralInfoKind.BUILD:
+      info.build = BuildInfo.decode(pdi.payload);
+      break;
+    case PeripheralInfoKind.HARDWARE:
+      info.hardware = HardwareInfo.decode(pdi.payload);
+      break;
+    case PeripheralInfoKind.ZMK_CONFIG:
+      info.zmkConfig = ZmkConfig.decode(pdi.payload);
+      break;
+    case PeripheralInfoKind.RUNTIME:
+      info.runtime = RuntimeStatus.decode(pdi.payload);
+      break;
+    case PeripheralInfoKind.DEVICES: {
+      const page = ZephyrDevicePage.decode(pdi.payload);
+      info.zephyrDevices = [...info.zephyrDevices, ...page.devices];
+      break;
+    }
+    default:
+      break;
+  }
+  return { ...entry, info, complete: entry.complete || pdi.last };
+}
+
+// Panel for split keyboards: asks the central to collect device info from its
+// connected peripheral half/halves. The central answers the request with an Ok
+// and streams each peripheral's info back as a series of PeripheralDeviceInfo
+// group notifications, which we accumulate here keyed by source (peripheral
+// index).
+export function PeripheralInfoPanel() {
+  const zmkApp = useContext(ZMKAppContext);
+  const [peripherals, setPeripherals] = useState<PeripheralEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Correlates notifications with the request that triggered them so replies
+  // from a previous query are ignored after a refresh.
+  const reqIdRef = useRef(0);
+
+  const subsystem = zmkApp?.findSubsystem(SUBSYSTEM_IDENTIFIER);
+  const connection = zmkApp?.state.connection;
+  const subsystemIndex = subsystem?.index;
+  const onNotification = zmkApp?.onNotification;
+
+  // Subscribe to PeripheralDeviceInfo notifications for our subsystem.
+  useEffect(() => {
+    if (!onNotification || subsystemIndex === undefined || subsystemIndex < 0)
+      return;
+    const unsubscribe = onNotification({
+      type: "custom",
+      subsystemIndex,
+      callback: (notification) => {
+        if (notification.subsystemIndex !== subsystemIndex) return;
+        let pdi: PeripheralDeviceInfo;
+        try {
+          pdi = PeripheralDeviceInfo.decode(notification.payload);
+        } catch {
+          return;
+        }
+        if (pdi.reqId !== reqIdRef.current) return;
+        setPeripherals((prev) => {
+          const existing = prev.find((p) => p.source === pdi.source);
+          const base: PeripheralEntry = existing ?? {
+            source: pdi.source,
+            info: DeviceInfoResponse.create(),
+            complete: false,
+          };
+          let updated: PeripheralEntry;
+          try {
+            updated = applyGroup(base, pdi);
+          } catch {
+            return prev;
+          }
+          const next = prev.filter((p) => p.source !== pdi.source);
+          next.push(updated);
+          next.sort((a, b) => a.source - b.source);
+          return next;
+        });
+        if (pdi.last) setIsLoading(false);
+      },
+    });
+    return unsubscribe;
+  }, [onNotification, subsystemIndex]);
+
+  const queryPeripherals = async () => {
+    if (!connection || subsystemIndex === undefined || subsystemIndex < 0)
+      return;
+    const reqId = (reqIdRef.current + 1) & 0xff;
+    reqIdRef.current = reqId;
+    setPeripherals([]);
+    setIsLoading(true);
+    setError(null);
+    try {
+      const service = new ZMKCustomSubsystem(connection, subsystemIndex);
+      const request = Request.create({ getPeripheralDeviceInfo: { reqId } });
+      const payload = Request.encode(request).finish();
+      const responsePayload = await service.callRPC(payload);
+      if (responsePayload) {
+        const resp = Response.decode(responsePayload);
+        if (resp.error) throw new Error(resp.error.message);
+      }
+      // Group notifications arrive asynchronously; the final one sets `last`,
+      // which stops the spinner. Fall back to a timeout so an empty result (no
+      // peripheral connected / not a split central) does not spin forever.
+      setTimeout(() => setIsLoading(false), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unknown error");
+      setIsLoading(false);
+    }
+  };
+
+  // Only meaningful on a split central; hide otherwise to avoid confusion.
+  if (!zmkApp || !subsystem) return null;
+
+  return (
+    <section className="card">
+      <div className="panel-header">
+        <h2>Peripheral Information</h2>
+        <div className="panel-actions">
+          <button
+            className="btn btn-primary"
+            disabled={isLoading}
+            onClick={queryPeripherals}
+          >
+            {isLoading ? "Querying..." : "Query Peripherals"}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="error-message">
+          <p>{error}</p>
+        </div>
+      )}
+      {peripherals.length === 0 && !isLoading && (
+        <p>
+          No peripheral replies yet. Click &quot;Query Peripherals&quot; on a
+          split central to collect device info from the connected half/halves.
+        </p>
+      )}
+      {peripherals.map((p) => (
+        <details key={p.source} open>
+          <summary>
+            <strong>Peripheral {p.source}</strong>
+            {!p.complete && <span className="badge-dirty"> loading…</span>}
+          </summary>
+          <DeviceInfoDisplay info={p.info} />
+        </details>
+      ))}
     </section>
   );
 }

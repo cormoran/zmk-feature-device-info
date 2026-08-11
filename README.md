@@ -14,6 +14,7 @@ A ZMK module that exposes keyboard diagnostic information via the **unofficial**
 | **ZMK Configuration** | KScan driver type, BLE/USB/split/display/RGB/backlight flags. |
 | **Runtime** | Uptime since last boot. |
 | **Zephyr Devices** | All statically-declared Zephyr devices and whether each initialized successfully. Failing devices are shown first. |
+| **Peripheral Information** | On a split keyboard, the same info collected from the connected peripheral half/halves (they live in a separate firmware image the central cannot read directly). See [Split peripherals](#split-peripherals) below. |
 
 A **Copy JSON** button lets users paste the full diagnostic data into a bug report.
 
@@ -60,6 +61,36 @@ Connect your keyboard via USB and open:
 
 Or run locally: see [web/README.md](./web/README.md).
 
+## Split peripherals
+
+On a split keyboard the two halves run **separate firmware images**, so the
+central (the half you connect to over USB/BLE) cannot read the peripheral's
+build hash, device list, reset cause, etc. directly. This module can relay a
+"collect device info" request from the central to the peripheral half/halves
+over the ZMK split **event relay** and deliver each peripheral's answer back to
+the web UI as a notification, shown under **Peripheral Information**.
+
+**Enable it on both halves** (it is on by default whenever the module and split
+are enabled):
+
+```conf
+CONFIG_ZMK_DEVICE_INFO=y
+CONFIG_ZMK_DEVICE_INFO_SPLIT=y
+```
+
+The central additionally needs `CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y` (to deliver
+the peripheral info to the web UI); the peripheral needs no ZMK Studio.
+
+To keep each relayed frame small, the peripheral sends its info back **one group
+at a time** — build, hardware, config, runtime, and the Zephyr device list in
+pages — instead of one large message. The web UI assembles the groups as they
+arrive. Every frame fits a small relay buffer, so this module keeps
+`CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN` at **256** (no need to raise it).
+
+> If a build fails with a `BUILD_ASSERT` about `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN`,
+> set `CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=256` explicitly on **both halves** —
+> a Kconfig `default` can lose to ZMK's own default.
+
 ## Notes
 
 - **zmk-config version**: The module automatically reads the git hash of your zmk-config directory at build time (via the `ZMK_CONFIG` CMake variable set by `west build`). No extra setup is needed.
@@ -70,7 +101,7 @@ Or run locally: see [web/README.md](./web/README.md).
   readelf -n build/zephyr/zmk.elf   # look for the "Build ID" line
   ```
 
-  The module enables the build-id automatically (Zephyr disables it by default) whenever the Studio RPC feature is on; no configuration is required.
+  The module enables the build-id automatically (Zephyr disables it by default) whenever the Studio RPC or split-peripheral feature is on; no configuration is required.
 
 ## Development
 

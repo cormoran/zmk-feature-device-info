@@ -104,6 +104,24 @@ class WestCommandsTests(unittest.TestCase):
                     ],
                     device=[],
                 ),
+                "board_split_central": ConfigAndDeviceTree(
+                    config=[
+                        "CONFIG_ZMK_DEVICE_INFO_STUDIO_RPC=y",
+                        "CONFIG_ZMK_DEVICE_INFO_SPLIT=y",
+                        "CONFIG_ZMK_SPLIT_ROLE_CENTRAL=y",
+                        "CONFIG_ZMK_SPLIT_RELAY_EVENT=y",
+                    ],
+                    device=[],
+                ),
+                "board_split_peripheral": ConfigAndDeviceTree(
+                    config=[
+                        "CONFIG_ZMK_DEVICE_INFO_SPLIT=y",
+                        "# CONFIG_ZMK_STUDIO is not set",
+                        "# CONFIG_ZMK_SPLIT_ROLE_CENTRAL is not set",
+                        "CONFIG_ZMK_SPLIT_RELAY_EVENT=y",
+                    ],
+                    device=[],
+                ),
             }
         )
 

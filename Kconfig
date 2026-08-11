@@ -6,6 +6,55 @@ if ZMK_DEVICE_INFO
 config ZMK_DEVICE_INFO_STUDIO_RPC
     bool "Enable ZMK device info custom Studio RPC"
     depends on ZMK_STUDIO
+    # nanopb is normally pulled in by ZMK_STUDIO, but select it explicitly so
+    # the shared proto/device_info_collect dispatch builds regardless of how it
+    # is reached (the split peripheral image reaches it without ZMK_STUDIO).
+    select NANOPB
+
+config ZMK_DEVICE_INFO_SPLIT
+    bool "Report split peripheral device info over the event relay"
+    depends on ZMK_SPLIT
+    default y
+    select ZMK_SPLIT_RELAY_EVENT
+    # The peripheral image collects and encodes its DeviceInfoResponse with
+    # nanopb but has no ZMK_STUDIO to pull nanopb in, so select it.
+    select NANOPB
+    help
+      On a split keyboard, relay a device-info collect request from the central
+      to the peripheral half/halves over the ZMK split event-relay and deliver
+      each peripheral's DeviceInfoResponse back to the connected Studio client
+      as a PeripheralDeviceInfo notification. This lets the web UI read the
+      peripheral half's own build/hardware/config/device state -- it lives in a
+      separate firmware image, so the central cannot read it directly. Both
+      halves must be built with this module. The central notification path
+      additionally requires ZMK_DEVICE_INFO_STUDIO_RPC; the peripheral only
+      needs this option (no ZMK_STUDIO) to answer requests.
+
+if ZMK_DEVICE_INFO_SPLIT
+
+config ZMK_DEVICE_INFO_RELAY_STACK_SIZE
+    int "Stack size (bytes) for the device info relay work queue"
+    default 4096
+    help
+      The relay work queue collects/encodes protobuf and -- on the central --
+      raises Studio RPC notifications, which synchronously build large
+      zmk_studio_Notification + zmk_studio_Response structs and run a double
+      pb_encode. Doing that on the shared system work queue (which the split
+      relay receive path already runs on) overflows its stack, so the relay
+      hands the heavy work to its own thread. Sized like the Studio RPC thread
+      (CONFIG_ZMK_STUDIO_RPC_THREAD_STACK_SIZE=4096). Raise it if you see a
+      stack overflow in the "di_relay" thread.
+
+# Peripheral device info is relayed one small group at a time (build, hardware,
+# config, runtime, and paged device-list frames), so each reply fits a 256 B
+# frame (see DEVICE_INFO_RELAY_REPLY_DATA_MAX in
+# include/zmk/device_info/relay_events.h). If this default does not take effect
+# for your build, set CONFIG_ZMK_SPLIT_RELAY_EVENT_DATA_LEN=256 explicitly on
+# BOTH halves -- relay_events.h BUILD_ASSERTs it.
+config ZMK_SPLIT_RELAY_EVENT_DATA_LEN
+    default 256
+
+endif
 
 config ZMK_DEVICE_INFO_STUDIO_RPC_REQUIRE_UNLOCK
     bool "Require a Studio unlock to read device info"

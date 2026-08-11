@@ -19,3 +19,13 @@ zmk.device_info.ZmkConfig.kscan_compatible    max_size:64
 zmk.device_info.ZmkConfig.split_role          max_size:16
 
 zmk.device_info.ErrorResponse.message         max_size:64
+
+# PeripheralDeviceInfo.payload holds one encoded group (BuildInfo /
+# HardwareInfo / ZmkConfig / RuntimeStatus / ZephyrDevicePage, selected by
+# `kind`) relayed from a split peripheral. Sized to match the relay reply buffer
+# (DEVICE_INFO_RELAY_REPLY_DATA_MAX in include/zmk/device_info/relay_events.h).
+zmk.device_info.PeripheralDeviceInfo.payload  max_size:248
+# ZephyrDevicePage carries a bounded page of the device list. max_count caps a
+# page at 5 entries (5 * ~38 B worst case < the 248 B payload), so a page always
+# fits one relay frame; the peripheral sends as many pages as needed.
+zmk.device_info.ZephyrDevicePage.devices      max_count:5
